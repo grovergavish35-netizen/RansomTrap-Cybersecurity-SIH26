@@ -2,11 +2,14 @@ import os
 import time
 import threading
 from datetime import datetime
+
 from flask import Flask, jsonify, render_template_string
 from flask_cors import CORS
+
 import psutil
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
 
 app = Flask(__name__)
 CORS(app)
@@ -49,15 +52,15 @@ def log_event(tag, msg):
 
 
 def init_files():
-    for f in DECOYS:
-        path = os.path.join(TRAPS_DIR, f)
+    for filename in DECOYS:
+        path = os.path.join(TRAPS_DIR, filename)
 
         if not os.path.exists(path):
             with open(path, "w") as fp:
                 fp.write("RANSOMTRAP CANARY HONEYPOT")
 
-    for f in USER_FILES:
-        path = os.path.join(PROTECTED_DIR, f)
+    for filename in USER_FILES:
+        path = os.path.join(PROTECTED_DIR, filename)
 
         if not os.path.exists(path):
             with open(path, "w") as fp:
@@ -75,17 +78,25 @@ def kill_malicious_process(filepath):
 
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
-            cmd = " ".join(proc.info.get("cmdline") or [])
+            cmdline = proc.info.get("cmdline") or []
+            cmd = " ".join(cmdline)
 
-            if "mock_ransomware" in cmd and proc.pid != os.getpid():
+            if (
+                "mock_ransomware" in cmd
+                and proc.pid != os.getpid()
+            ):
                 culprit_pid = proc.info["pid"]
 
-                p = psutil.Process(culprit_pid)
-                p.kill()
+                process = psutil.Process(culprit_pid)
+                process.kill()
 
                 break
 
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except (
+            psutil.NoSuchProcess,
+            psutil.AccessDenied,
+            psutil.ZombieProcess
+        ):
             continue
 
     elapsed = round(
@@ -96,11 +107,10 @@ def kill_malicious_process(filepath):
     SYSTEM_STATUS["state"] = "Threat Terminated"
     SYSTEM_STATUS["threats_killed"] += 1
 
-    SYSTEM_STATUS["last_killed_pid"] = (
-        str(culprit_pid)
-        if culprit_pid
-        else "PID: 8192"
-    )
+    if culprit_pid:
+        SYSTEM_STATUS["last_killed_pid"] = str(culprit_pid)
+    else:
+        SYSTEM_STATUS["last_killed_pid"] = "PID: 8192"
 
     SYSTEM_STATUS["latency"] = f"{elapsed} ms"
 
@@ -126,16 +136,16 @@ def kill_malicious_process(filepath):
 class TrapWatcher(FileSystemEventHandler):
 
     def on_modified(self, event):
+        if event.is_directory:
+            return
 
-        if (
-            not event.is_directory
-            and os.path.basename(event.src_path) in DECOYS
-        ):
+        filename = os.path.basename(event.src_path)
+
+        if filename in DECOYS:
             kill_malicious_process(event.src_path)
 
 
 def start_monitor():
-
     observer = Observer()
 
     observer.schedule(
@@ -155,7 +165,6 @@ def start_monitor():
 
 @app.route("/api/data")
 def get_data():
-
     return jsonify({
         "status": SYSTEM_STATUS,
         "logs": LOGS,
@@ -167,7 +176,7 @@ def get_data():
 @app.route("/api/attack", methods=["POST"])
 def simulate():
 
-    def run_sim():
+    def run_simulation():
 
         log_event(
             "ATTACK",
@@ -182,7 +191,6 @@ def simulate():
         )
 
         try:
-
             with open(target, "a") as fp:
                 fp.write(
                     "\n[ENCRYPTED_TEST_PAYLOAD]"
@@ -192,7 +200,7 @@ def simulate():
             pass
 
     threading.Thread(
-        target=run_sim,
+        target=run_simulation,
         daemon=True
     ).start()
 
@@ -220,518 +228,367 @@ def reset():
 
 HTML = """
 <!DOCTYPE html>
-<html>
+
+<html lang="en">
 
 <head>
 
-    <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-    <title>RansomTrap Dashboard</title>
-
-    <style>
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: Segoe UI, Tahoma, Arial, sans-serif;
-        }
-
-        html {
-            width: 100%;
-            overflow-x: hidden;
-        }
-
-        body {
-            width: 100%;
-            min-height: 100vh;
-            background-color: #f4f6f9;
-            color: #1e293b;
-            padding: 25px;
-            overflow-x: hidden;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 1050px;
-            margin: 0 auto;
-        }
-
-        .header {
-            width: 100%;
-            background: #0f172a;
-            color: white;
-            padding: 18px 25px;
-            border-radius: 8px;
-
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-
-            gap: 20px;
-        }
-
-        .header-content {
-            min-width: 0;
-            flex: 1;
-        }
-
-        .header h1 {
-            font-size: 20px;
-            font-weight: 600;
-            line-height: 1.3;
-            overflow-wrap: anywhere;
-        }
-
-        .header p {
-            font-size: 13px;
-            color: #94a3b8;
-            margin-top: 5px;
-            line-height: 1.5;
-        }
-
-        .header-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            flex-shrink: 0;
-        }
-
-        .btn {
-            min-height: 38px;
-            padding: 8px 16px;
-            border: none;
-            border-radius: 5px;
-
-            font-weight: bold;
-            cursor: pointer;
-            font-size: 13px;
+<meta charset="UTF-8">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
+
+<title>RansomTrap Dashboard</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: Segoe UI, Tahoma, Arial, sans-serif;
+}
+
+body {
+    background: #f4f6f9;
+    color: #1e293b;
+    padding: 20px;
+}
+
+.container {
+    width: 100%;
+    max-width: 1100px;
+    margin: auto;
+}
+
+.header {
+    background: #0f172a;
+    color: white;
+    padding: 20px;
+    border-radius: 10px;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    gap: 20px;
+}
+
+.header-content {
+    min-width: 0;
+}
+
+.header h1 {
+    font-size: 21px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.header p {
+    font-size: 13px;
+    color: #94a3b8;
+    margin-top: 5px;
+}
+
+.header-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.btn {
+    padding: 9px 15px;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.btn-attack {
+    background: #dc2626;
+    color: white;
+}
+
+.btn-attack:hover {
+    background: #b91c1c;
+}
+
+.btn-reset {
+    background: #334155;
+    color: white;
+}
+
+.btn-reset:hover {
+    background: #475569;
+}
+
+.status-box {
+    margin-top: 15px;
+    padding: 14px 18px;
+    border-radius: 7px;
+
+    font-weight: bold;
+    font-size: 14px;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    gap: 12px;
+
+    border: 1px solid #cbd5e1;
+}
 
-            white-space: nowrap;
-            transition: 0.2s ease;
-        }
+.status-protected {
+    background: #e6f9ed;
+    color: #166534;
+    border-color: #bbf7d0;
+}
 
-        .btn-attack {
-            background: #dc2626;
-            color: white;
-        }
+.status-danger {
+    background: #fee2e2;
+    color: #991b1b;
+    border-color: #fecaca;
+}
 
-        .btn-attack:hover {
-            background: #b91c1c;
-        }
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-top: 15px;
+}
 
-        .btn-reset {
-            background: #334155;
-            color: white;
-        }
+.card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    padding: 16px;
+    border-radius: 7px;
+
+    box-shadow:
+        0 1px 3px rgba(0, 0, 0, 0.05);
+
+    min-width: 0;
+}
+
+.card-title {
+    font-size: 12px;
+    color: #64748b;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.card-val {
+    font-size: 20px;
+    font-weight: bold;
+    color: #0f172a;
+    margin-top: 6px;
+    word-break: break-word;
+}
 
-        .btn-reset:hover {
-            background: #475569;
-        }
+.main-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
 
-        .status-box {
-            width: 100%;
-            margin-top: 15px;
+    gap: 15px;
+    margin-top: 15px;
+}
 
-            padding: 14px 20px;
+.panel {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 7px;
+    padding: 16px;
 
-            border-radius: 6px;
+    min-width: 0;
+}
 
-            font-weight: bold;
-            font-size: 15px;
+.panel-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: #0f172a;
 
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+    border-bottom: 2px solid #f1f5f9;
 
-            gap: 15px;
+    padding-bottom: 9px;
+    margin-bottom: 11px;
+}
 
-            border: 1px solid #cbd5e1;
+.section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #64748b;
 
-            overflow-wrap: anywhere;
-        }
+    margin-bottom: 7px;
+}
 
-        .status-protected {
-            background: #e6f9ed;
-            color: #166534;
-            border-color: #bbf7d0;
-        }
+.user-label {
+    margin-top: 13px;
+}
 
-        .status-danger {
-            background: #fee2e2;
-            color: #991b1b;
-            border-color: #fecaca;
-        }
+.file-item {
+    font-size: 13px;
 
-        #statusText {
-            min-width: 0;
-            line-height: 1.5;
-        }
+    padding: 9px;
 
-        #statusTag {
-            flex-shrink: 0;
-            white-space: nowrap;
-        }
+    background: #f8fafc;
 
-        .stats-grid {
-            width: 100%;
+    border: 1px solid #e2e8f0;
 
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-radius: 5px;
 
-            gap: 15px;
+    margin-bottom: 6px;
 
-            margin-top: 15px;
-        }
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 
-        .card {
-            min-width: 0;
+    gap: 10px;
 
-            background: white;
+    min-width: 0;
+}
 
-            border: 1px solid #e2e8f0;
+.file-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
 
-            padding: 15px;
+.badge {
+    font-size: 10px;
+    padding: 3px 7px;
+    border-radius: 4px;
+    font-weight: bold;
+    flex-shrink: 0;
+}
 
-            border-radius: 6px;
+.badge-decoy {
+    background: #e0f2fe;
+    color: #0369a1;
+}
 
-            box-shadow:
-                0 1px 3px rgba(0,0,0,0.05);
-        }
+.badge-user {
+    background: #f0fdf4;
+    color: #15803d;
+}
 
-        .card-title {
-            font-size: 12px;
+.terminal {
+    background: #0f172a;
+    color: #f8fafc;
 
-            color: #64748b;
+    font-family: Consolas, monospace;
+    font-size: 12px;
 
-            text-transform: uppercase;
+    padding: 12px;
 
-            font-weight: 600;
+    border-radius: 6px;
 
-            line-height: 1.4;
-        }
+    height: 260px;
 
-        .card-val {
-            font-size: 20px;
+    overflow-y: auto;
+    overflow-x: hidden;
 
-            font-weight: bold;
+    word-break: break-word;
+}
 
-            color: #0f172a;
+.log-line {
+    margin-bottom: 5px;
+    line-height: 1.45;
+    word-break: break-word;
+}
 
-            margin-top: 5px;
+@media (max-width: 900px) {
 
-            overflow-wrap: anywhere;
-        }
+    body {
+        padding: 15px;
+    }
 
-        .main-split {
-            width: 100%;
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 
-            display: grid;
+    .main-split {
+        grid-template-columns: 1fr;
+    }
 
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
 
-            gap: 15px;
+@media (max-width: 650px) {
 
-            margin-top: 15px;
-        }
+    .header {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: left;
+    }
 
-        .panel {
-            min-width: 0;
+    .header-actions {
+        width: 100%;
+    }
 
-            background: white;
+    .btn {
+        flex: 1;
+    }
 
-            border: 1px solid #e2e8f0;
+    .status-box {
+        flex-direction: column;
+        align-items: flex-start;
+    }
 
-            border-radius: 6px;
+}
 
-            padding: 15px;
+@media (max-width: 480px) {
 
-            overflow: hidden;
-        }
+    body {
+        padding: 10px;
+    }
 
-        .panel-header {
-            font-size: 14px;
+    .header {
+        padding: 16px;
+    }
 
-            font-weight: 600;
+    .header h1 {
+        font-size: 18px;
+    }
 
-            color: #0f172a;
+    .header p {
+        font-size: 12px;
+    }
 
-            border-bottom: 2px solid #f1f5f9;
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
 
-            padding-bottom: 8px;
+    .panel,
+    .card {
+        padding: 13px;
+    }
 
-            margin-bottom: 10px;
+    .file-item {
+        align-items: flex-start;
+    }
 
-            line-height: 1.4;
-        }
+    .badge {
+        font-size: 9px;
+    }
 
-        .section-title {
-            font-size: 12px;
-            font-weight: 600;
-            color: #64748b;
-            margin-bottom: 6px;
-            line-height: 1.4;
-        }
+    .terminal {
+        height: 230px;
+        font-size: 11px;
+    }
 
-        .section-title.user {
-            margin-top: 12px;
-        }
+}
 
-        .file-item {
-            width: 100%;
-            min-width: 0;
-
-            font-size: 13px;
-
-            padding: 8px;
-
-            background: #f8fafc;
-
-            border: 1px solid #e2e8f0;
-
-            border-radius: 4px;
-
-            margin-bottom: 6px;
-
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-
-            gap: 8px;
-        }
-
-        .file-name {
-            min-width: 0;
-            flex: 1;
-
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .badge {
-            flex-shrink: 0;
-
-            font-size: 11px;
-
-            padding: 3px 6px;
-
-            border-radius: 3px;
-
-            font-weight: bold;
-
-            white-space: nowrap;
-        }
-
-        .badge-decoy {
-            background: #e0f2fe;
-            color: #0369a1;
-        }
-
-        .badge-user {
-            background: #f0fdf4;
-            color: #15803d;
-        }
-
-        .terminal {
-            width: 100%;
-
-            background: #0f172a;
-
-            color: #f8fafc;
-
-            font-family: Consolas, Monaco, monospace;
-
-            font-size: 12px;
-
-            padding: 12px;
-
-            border-radius: 6px;
-
-            height: 180px;
-
-            overflow-y: auto;
-            overflow-x: auto;
-
-            white-space: normal;
-
-            word-break: break-word;
-        }
-
-        .log-line {
-            margin-bottom: 6px;
-
-            line-height: 1.5;
-
-            word-break: break-word;
-            overflow-wrap: anywhere;
-        }
-
-        @media (max-width: 900px) {
-
-            body {
-                padding: 18px;
-            }
-
-            .header {
-                align-items: flex-start;
-            }
-
-            .stats-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-
-            .main-split {
-                grid-template-columns: 1fr;
-            }
-
-        }
-
-        @media (max-width: 650px) {
-
-            body {
-                padding: 12px;
-            }
-
-            .header {
-                flex-direction: column;
-                align-items: stretch;
-                padding: 16px;
-                gap: 15px;
-            }
-
-            .header h1 {
-                font-size: 18px;
-            }
-
-            .header p {
-                font-size: 12px;
-            }
-
-            .header-actions {
-                width: 100%;
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 8px;
-            }
-
-            .btn {
-                width: 100%;
-                padding: 9px 10px;
-            }
-
-            .status-box {
-                flex-direction: column;
-                align-items: flex-start;
-                padding: 13px 15px;
-                font-size: 14px;
-            }
-
-            #statusTag {
-                white-space: normal;
-            }
-
-            .stats-grid {
-                grid-template-columns: 1fr 1fr;
-                gap: 10px;
-            }
-
-            .card {
-                padding: 13px;
-            }
-
-            .card-title {
-                font-size: 11px;
-            }
-
-            .card-val {
-                font-size: 18px;
-            }
-
-            .panel {
-                padding: 13px;
-            }
-
-            .file-item {
-                align-items: flex-start;
-            }
-
-        }
-
-        @media (max-width: 430px) {
-
-            body {
-                padding: 8px;
-            }
-
-            .header {
-                padding: 14px;
-                border-radius: 7px;
-            }
-
-            .header h1 {
-                font-size: 17px;
-            }
-
-            .header-actions {
-                grid-template-columns: 1fr;
-            }
-
-            .status-box {
-                margin-top: 10px;
-            }
-
-            .stats-grid {
-                grid-template-columns: 1fr;
-                gap: 10px;
-                margin-top: 10px;
-            }
-
-            .main-split {
-                gap: 10px;
-                margin-top: 10px;
-            }
-
-            .panel {
-                padding: 11px;
-            }
-
-            .panel-header {
-                font-size: 13px;
-            }
-
-            .file-item {
-                font-size: 12px;
-                padding: 8px 7px;
-            }
-
-            .badge {
-                font-size: 10px;
-                padding: 3px 5px;
-            }
-
-            .terminal {
-                height: 200px;
-                font-size: 11px;
-                padding: 10px;
-            }
-
-        }
-
-    </style>
+</style>
 
 </head>
-
 
 <body>
 
 <div class="container">
-
 
     <div class="header">
 
@@ -747,7 +604,6 @@ HTML = """
 
         </div>
 
-
         <div class="header-actions">
 
             <button
@@ -756,7 +612,6 @@ HTML = """
             >
                 Simulate Attack
             </button>
-
 
             <button
                 class="btn btn-reset"
@@ -783,6 +638,10 @@ HTML = """
 
         <span
             id="statusTag"
+            style="
+                font-size: 12px;
+                font-weight: bold;
+            "
         >
             ACTIVE MONITORING
         </span>
@@ -791,7 +650,6 @@ HTML = """
 
 
     <div class="stats-grid">
-
 
         <div class="card">
 
@@ -850,12 +708,10 @@ HTML = """
 
         </div>
 
-
     </div>
 
 
     <div class="main-split">
-
 
         <div class="panel">
 
@@ -863,21 +719,17 @@ HTML = """
                 Active Traps & Protected Files
             </div>
 
-
-            <div class="section-title">
+            <div class="section-label">
                 HONEYPOT TRIPWIRES
                 (CANARY FILES)
             </div>
 
-
             <div id="decoyList"></div>
 
-
-            <div class="section-title user">
+            <div class="section-label user-label">
                 REAL USER ASSETS
                 (VERIFIED SAFE)
             </div>
-
 
             <div id="userFileList"></div>
 
@@ -890,7 +742,6 @@ HTML = """
                 Real-Time Security Event Logs
             </div>
 
-
             <div
                 class="terminal"
                 id="logBox"
@@ -898,30 +749,27 @@ HTML = """
 
         </div>
 
-
     </div>
-
 
 </div>
 
 
 <script>
 
-
 async function updateUI() {
 
     try {
 
-        let res = await fetch("/api/data");
+        const response =
+            await fetch("/api/data");
 
-        let data = await res.json();
-
+        const data =
+            await response.json();
 
         document.getElementById(
             "valThreats"
         ).innerText =
             data.status.threats_killed;
-
 
         document.getElementById(
             "valLatency"
@@ -929,19 +777,17 @@ async function updateUI() {
             data.status.latency;
 
 
-        let banner =
+        const banner =
             document.getElementById(
                 "statusBanner"
             );
 
-
-        let text =
+        const text =
             document.getElementById(
                 "statusText"
             );
 
-
-        let tag =
+        const tag =
             document.getElementById(
                 "statusTag"
             );
@@ -955,10 +801,11 @@ async function updateUI() {
             banner.className =
                 "status-box status-danger";
 
-
             text.innerText =
-                `ALERT: Threat Neutralized! Malicious ${data.status.last_killed_pid} auto-killed.`;
-
+                "ALERT: Threat Neutralized! " +
+                "Malicious " +
+                data.status.last_killed_pid +
+                " auto-killed.";
 
             tag.innerText =
                 "THREAT BLOCKED";
@@ -968,102 +815,105 @@ async function updateUI() {
             banner.className =
                 "status-box status-protected";
 
-
             text.innerText =
-                "System Status: PROTECTED (Active Tripwires Armed)";
-
+                "System Status: PROTECTED " +
+                "(Active Tripwires Armed)";
 
             tag.innerText =
                 "ACTIVE MONITORING";
-
         }
 
 
         document.getElementById(
             "decoyList"
         ).innerHTML =
-            data.decoys.map(d => `
+            data.decoys.map(
+                function(decoy) {
 
-                <div class="file-item">
+                    return `
+                        <div class="file-item">
 
-                    <span class="file-name">
-                        📁 ${d}
-                    </span>
+                            <span class="file-name">
+                                📁 ${decoy}
+                            </span>
 
-                    <span class="badge badge-decoy">
-                        CANARY TRAP
-                    </span>
+                            <span class="badge badge-decoy">
+                                CANARY TRAP
+                            </span>
 
-                </div>
+                        </div>
+                    `;
 
-            `).join("");
+                }
+            ).join("");
 
 
         document.getElementById(
             "userFileList"
         ).innerHTML =
-            data.user_files.map(u => `
+            data.user_files.map(
+                function(file) {
 
-                <div class="file-item">
+                    return `
+                        <div class="file-item">
 
-                    <span class="file-name">
-                        📄 ${u}
-                    </span>
+                            <span class="file-name">
+                                📄 ${file}
+                            </span>
 
-                    <span class="badge badge-user">
-                        SAFE (100%)
-                    </span>
+                            <span class="badge badge-user">
+                                SAFE (100%)
+                            </span>
 
-                </div>
+                        </div>
+                    `;
 
-            `).join("");
+                }
+            ).join("");
 
 
         document.getElementById(
             "logBox"
         ).innerHTML =
-            data.logs.map(l => {
+            data.logs.map(
+                function(log) {
 
-                let color = "#cbd5e1";
+                    let color =
+                        "#cbd5e1";
 
+                    if (
+                        log.includes("[ALERT]")
+                    ) {
+                        color = "#f87171";
+                    }
 
-                if (
-                    l.includes("[ALERT]")
-                ) {
-                    color = "#f87171";
+                    if (
+                        log.includes("[KILL]")
+                    ) {
+                        color = "#4ade80";
+                    }
+
+                    if (
+                        log.includes("[SYSTEM]")
+                    ) {
+                        color = "#38bdf8";
+                    }
+
+                    return `
+                        <div
+                            class="log-line"
+                            style="color:${color}"
+                        >
+                            ${log}
+                        </div>
+                    `;
+
                 }
+            ).join("");
 
+    } catch (error) {
 
-                if (
-                    l.includes("[KILL]")
-                ) {
-                    color = "#4ade80";
-                }
-
-
-                if (
-                    l.includes("[SYSTEM]")
-                ) {
-                    color = "#38bdf8";
-                }
-
-
-                return `
-                    <div
-                        class="log-line"
-                        style="color:${color}"
-                    >
-                        ${l}
-                    </div>
-                `;
-
-            }).join("");
-
-    }
-
-    catch (err) {
-
-        console.error(err);
+        console.error(error);
 
     }
 
@@ -1081,7 +931,7 @@ async function triggerAttack() {
 
     setTimeout(
         updateUI,
-        700
+        300
     );
 
 }
@@ -1098,7 +948,7 @@ async function resetSystem() {
 
     setTimeout(
         updateUI,
-        200
+        300
     );
 
 }
@@ -1109,12 +959,9 @@ setInterval(
     1000
 );
 
-
 updateUI();
 
-
 </script>
-
 
 </body>
 
@@ -1127,21 +974,40 @@ def home():
     return render_template_string(HTML)
 
 
-init_files()
-start_monitor()
+def initialize_application():
+    init_files()
+
+    try:
+        start_monitor()
+    except Exception as error:
+        log_event(
+            "ERROR",
+            f"Watchdog monitor could not start: {error}"
+        )
+
+
+initialize_application()
 
 
 if __name__ == "__main__":
-
-    print("---------------------------------------------")
-    print(" RansomTrap Running")
-    print("---------------------------------------------")
 
     port = int(
         os.environ.get(
             "PORT",
             5000
         )
+    )
+
+    print(
+        "-----------------------------------------------------"
+    )
+
+    print(
+        f" RansomTrap Running on port: {port}"
+    )
+
+    print(
+        "-----------------------------------------------------"
     )
 
     app.run(
